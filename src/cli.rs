@@ -494,6 +494,9 @@ mod tests {
             }
         );
         assert!(run("add").is_err());
+        // Canopy sends links pasted together as one argument.
+        let pasted = parse(vec!["add".into(), "https://a  https://b\thttps://c".into()]);
+        assert!(matches!(pasted.unwrap().command, Command::Add { links, .. } if links.len() == 3));
         assert_eq!(
             run(r#"call /a/b {"x":1} true"#).unwrap().command,
             Command::Call {
