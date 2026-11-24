@@ -238,7 +238,8 @@ pub fn build_state(raw: Raw) -> State {
         .filter(|link| link.state == RowState::Running)
         .count();
     let controller = controller_state(&raw.controller);
-    let eta = (raw.speed > 0 && bytes_total > bytes_loaded)
+    // A paused or stopped controller still reports a trickle of speed: no time left then.
+    let eta = (controller == "running" && raw.speed > 0 && bytes_total > bytes_loaded)
         .then(|| (bytes_total - bytes_loaded) / raw.speed);
     State {
         version: 1,
@@ -396,6 +397,11 @@ mod tests {
         });
         assert!(!state.summary.active);
         assert_eq!(state.summary.progress, None);
+        let paused = build_state(Raw {
+            controller: "PAUSE".into(),
+            ..raw()
+        });
+        assert_eq!(paused.summary.eta, None);
         assert_eq!(state.summary.eta, None);
     }
 }
