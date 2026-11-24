@@ -1,0 +1,30 @@
+[package]
+name = "jdctl"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Control JDownloader 2 from the command line, locally or through MyJDownloader"
+license = "MIT"
+repository = "https://github.com/AlexArtaud-Dev/jdctl"
+keywords = ["jdownloader", "download", "cli"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+aes = "0.8"
+base64 = "0.22"
+cbc = { version = "0.1", features = ["std"] }
+hex = "0.4"
+hmac = "0.12"
+lexopt = "0.3"
+rpassword = "7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
