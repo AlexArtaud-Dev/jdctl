@@ -275,7 +275,7 @@ commands:
         flag: --url={value}
         pattern: 'https?://[A-Za-z0-9.:\[\]_-]+(/[A-Za-z0-9._~/-]*)?'
         label: { en: "Address", fr: "Adresse", es: "Dirección" }
-        help: { en: "Like http://192.168.1.11:3128", fr: "Par exemple http://192.168.1.11:3128", es: "Por ejemplo http://192.168.1.11:3128" }
+        help: { en: "Like http://192.168.1.10:3128", fr: "Par exemple http://192.168.1.10:3128", es: "Por ejemplo http://192.168.1.10:3128" }
       - name: default
         type: bool
         flag: --default
