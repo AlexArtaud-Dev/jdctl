@@ -1,0 +1,348 @@
+# Canopy plugin manifest. The release workflow sets `version` from the tag and publishes this
+# file next to the binaries and SHA256SUMS.
+id: jdctl
+name: { en: "JDownloader", fr: "JDownloader", es: "JDownloader" }
+description:
+  en: Follows and controls JDownloader 2 (on the network or through MyJDownloader) from a Downloads page.
+  fr: Suit et pilote JDownloader 2 (sur le réseau ou via MyJDownloader) depuis une page Téléchargements.
+  es: Sigue y controla JDownloader 2 (en la red o mediante MyJDownloader) desde una página Descargas.
+version: 0.0.0
+binary: jdctl
+# Plugin views (the Downloads page) from this Canopy version.
+minCanopy: 2026.11.44
+source:
+  repo: AlexArtaud-Dev/jdctl
+  checksums: SHA256SUMS
+  assets:
+    linux-amd64: jdctl-linux-amd64
+    linux-arm64: jdctl-linux-arm64
+
+views:
+  - id: downloads
+    name: { en: "Downloads", fr: "Téléchargements", es: "Descargas" }
+    icon: download
+    source: jdctl.state
+    refresh: 3s
+    widget: true
+    sections:
+      - key: downloads
+        name: { en: "Downloads", fr: "Téléchargements", es: "Descargas" }
+        empty: { en: "No download.", fr: "Aucun téléchargement.", es: "Ninguna descarga." }
+        rowActions: [enable, disable, force, reset, rename, remove]
+      - key: grabber
+        name: { en: "Link grabber", fr: "Liens trouvés", es: "Enlaces encontrados" }
+        empty:
+          en: Nothing waiting. Add links to see what JDownloader finds.
+          fr: Rien en attente. Ajoutez des liens pour voir ce que JDownloader trouve.
+          es: Nada en espera. Añada enlaces para ver lo que JDownloader encuentra.
+        rowActions: [confirm, check, discard]
+    states:
+      - { key: running, tone: active, label: { en: "Downloading", fr: "En cours", es: "Descargando" } }
+      - { key: finished, tone: success, label: { en: "Finished", fr: "Terminé", es: "Terminado" } }
+      - { key: waiting, tone: muted, label: { en: "Waiting", fr: "En attente", es: "En espera" } }
+      - { key: disabled, tone: muted, label: { en: "Disabled", fr: "Désactivé", es: "Desactivado" } }
+      - { key: failed, tone: danger, label: { en: "Failed", fr: "Échec", es: "Fallido" } }
+      - { key: online, tone: success, label: { en: "Online", fr: "En ligne", es: "En línea" } }
+      - { key: offline, tone: danger, label: { en: "Offline", fr: "Hors ligne", es: "Sin conexión" } }
+      - { key: unknown, tone: muted, label: { en: "Unknown", fr: "Inconnu", es: "Desconocido" } }
+      - { key: paused, tone: warning, label: { en: "Paused", fr: "En pause", es: "En pausa" } }
+      - { key: stopped, tone: muted, label: { en: "Stopped", fr: "Arrêté", es: "Detenido" } }
+      - { key: idle, tone: muted, label: { en: "Idle", fr: "Inactif", es: "Inactivo" } }
+    actions:
+      - { id: start, on: view, icon: play, command: jdctl.resume, name: { en: "Start", fr: "Démarrer", es: "Iniciar" } }
+      - { id: pause, on: view, icon: pause, command: jdctl.pause, name: { en: "Pause", fr: "Pause", es: "Pausa" } }
+      - { id: stop, on: view, icon: square, command: jdctl.stop, name: { en: "Stop", fr: "Arrêter", es: "Detener" } }
+      - { id: add, on: view, icon: plus, command: jdctl.add, input: links, name: { en: "Add links", fr: "Ajouter des liens", es: "Añadir enlaces" } }
+      - { id: enable, on: row, icon: check, command: jdctl.enable, items: links, groups: packages, name: { en: "Enable", fr: "Activer", es: "Activar" } }
+      - { id: disable, on: row, icon: eye-off, command: jdctl.disable, items: links, groups: packages, name: { en: "Disable", fr: "Désactiver", es: "Desactivar" } }
+      - { id: force, on: row, icon: zap, command: jdctl.force, items: links, groups: packages, name: { en: "Force", fr: "Forcer", es: "Forzar" } }
+      - { id: reset, on: row, icon: rotate-ccw, command: jdctl.reset, items: links, groups: packages, name: { en: "Restart", fr: "Recommencer", es: "Reiniciar" } }
+      - { id: rename, on: row, icon: pencil, command: jdctl.rename, items: links, groups: packages, input: name, name: { en: "Rename", fr: "Renommer", es: "Renombrar" } }
+      - { id: remove, on: row, icon: trash, command: jdctl.remove, items: links, groups: packages, confirm: true, name: { en: "Remove", fr: "Retirer", es: "Quitar" } }
+      - { id: confirm, on: row, icon: download, command: jdctl.confirm, items: links, groups: packages, name: { en: "Download", fr: "Télécharger", es: "Descargar" } }
+      - { id: check, on: row, icon: refresh, command: jdctl.check, items: links, groups: packages, name: { en: "Check online", fr: "Vérifier", es: "Comprobar" } }
+      - { id: discard, on: row, icon: x, command: jdctl.discard, items: links, groups: packages, confirm: true, name: { en: "Discard", fr: "Écarter", es: "Descartar" } }
+
+commands:
+  # Read by the Downloads page every few seconds.
+  - id: jdctl.state
+    name: { en: "Downloads state", fr: "État des téléchargements", es: "Estado de las descargas" }
+    description: { en: "Packages, links and progress as JSON.", fr: "Paquets, liens et progression en JSON.", es: "Paquetes, enlaces y progreso en JSON." }
+    binary: jdctl
+    mode: basic
+    secondary: true
+    # Shared params are YAML anchors, defined at their first use.
+    params:
+      - &connection
+        name: connection
+        type: string
+        flag: --connection={value}
+        pattern: '[A-Za-z0-9._-]{1,40}'
+        advanced: true
+        label: { en: "Connection", fr: "Connexion", es: "Conexión" }
+        help:
+          en: A saved connection; empty uses the default one.
+          fr: Une connexion enregistrée ; vide, celle par défaut.
+          es: Una conexión guardada; vacía, la predeterminada.
+    args: [state, --json, '{flags}']
+    progressParser: none
+    timeout: 30s
+
+  - id: jdctl.resume
+    name: { en: "Start downloads", fr: "Démarrer les téléchargements", es: "Iniciar las descargas" }
+    description: { en: "Starts or resumes JDownloader.", fr: "Démarre ou reprend JDownloader.", es: "Inicia o reanuda JDownloader." }
+    binary: jdctl
+    mode: basic
+    secondary: true
+    params: [*connection]
+    args: [resume, '{flags}']
+    progressParser: none
+    timeout: 30s
+
+  - id: jdctl.pause
+    name: { en: "Pause downloads", fr: "Mettre en pause", es: "Pausar las descargas" }
+    description: { en: "Pauses JDownloader.", fr: "Met JDownloader en pause.", es: "Pausa JDownloader." }
+    binary: jdctl
+    mode: basic
+    secondary: true
+    params: [*connection]
+    args: [pause, '{flags}']
+    progressParser: none
+    timeout: 30s
+
+  - id: jdctl.stop
+    name: { en: "Stop downloads", fr: "Arrêter les téléchargements", es: "Detener las descargas" }
+    description: { en: "Stops JDownloader's downloads.", fr: "Arrête les téléchargements de JDownloader.", es: "Detiene las descargas de JDownloader." }
+    binary: jdctl
+    mode: basic
+    secondary: true
+    params: [*connection]
+    args: [stop, '{flags}']
+    progressParser: none
+    timeout: 30s
+
+  - id: jdctl.add
+    name: { en: "Add links", fr: "Ajouter des liens", es: "Añadir enlaces" }
+    description: { en: "Sends links to JDownloader's link grabber.", fr: "Envoie des liens au collecteur de JDownloader.", es: "Envía enlaces al recolector de JDownloader." }
+    binary: jdctl
+    mode: basic
+    secondary: true
+    params:
+      - name: links
+        type: string
+        required: true
+        label: { en: "Links", fr: "Liens", es: "Enlaces" }
+        help: { en: "One or more links, separated by spaces.", fr: "Un ou plusieurs liens, séparés par des espaces.", es: "Uno o varios enlaces, separados por espacios." }
+      - *connection
+    args: [add, '{links}', '{flags}']
+    progressParser: none
+    timeout: 1m
+
+  - id: jdctl.rename
+    name: { en: "Rename", fr: "Renommer", es: "Renombrar" }
+    description: { en: "Renames one link or package.", fr: "Renomme un lien ou un paquet.", es: "Renombra un enlace o un paquete." }
+    binary: jdctl
+    mode: basic
+    secondary: true
+    params:
+      - name: name
+        type: string
+        required: true
+        label: { en: "New name", fr: "Nouveau nom", es: "Nuevo nombre" }
+      - &links
+        name: links
+        type: string
+        flag: --link={value}
+        pattern: '[0-9]+(,[0-9]+)*'
+        label: { en: "Links", fr: "Liens", es: "Enlaces" }
+      - &packages
+        name: packages
+        type: string
+        flag: --package={value}
+        pattern: '[0-9]+(,[0-9]+)*'
+        label: { en: "Packages", fr: "Paquets", es: "Paquetes" }
+      - *connection
+    args: [rename, '{name}', '{flags}']
+    progressParser: none
+    timeout: 30s
+
+  - id: jdctl.enable
+    name: { en: "Enable", fr: "Activer", es: "Activar" }
+    description: { en: "Enables links or packages.", fr: "Active des liens ou des paquets.", es: "Activa enlaces o paquetes." }
+    binary: jdctl
+    mode: basic
+    secondary: true
+    params: [*links, *packages, *connection]
+    args: [enable, '{flags}']
+    progressParser: none
+    timeout: 30s
+
+  - id: jdctl.disable
+    name: { en: "Disable", fr: "Désactiver", es: "Desactivar" }
+    description: { en: "Disables links or packages.", fr: "Désactive des liens ou des paquets.", es: "Desactiva enlaces o paquetes." }
+    binary: jdctl
+    mode: basic
+    secondary: true
+    params: [*links, *packages, *connection]
+    args: [disable, '{flags}']
+    progressParser: none
+    timeout: 30s
+
+  - id: jdctl.force
+    name: { en: "Force download", fr: "Forcer le téléchargement", es: "Forzar la descarga" }
+    description: { en: "Downloads links or packages now.", fr: "Télécharge des liens ou des paquets maintenant.", es: "Descarga enlaces o paquetes ahora." }
+    binary: jdctl
+    mode: basic
+    secondary: true
+    params: [*links, *packages, *connection]
+    args: [force, '{flags}']
+    progressParser: none
+    timeout: 30s
+
+  - id: jdctl.reset
+    name: { en: "Restart download", fr: "Recommencer le téléchargement", es: "Reiniciar la descarga" }
+    description: { en: "Downloads links or packages again from the start.", fr: "Retélécharge des liens ou des paquets depuis le début.", es: "Vuelve a descargar enlaces o paquetes desde el principio." }
+    binary: jdctl
+    mode: basic
+    secondary: true
+    params: [*links, *packages, *connection]
+    args: [reset, '{flags}']
+    progressParser: none
+    timeout: 30s
+
+  - id: jdctl.remove
+    name: { en: "Remove downloads", fr: "Retirer des téléchargements", es: "Quitar descargas" }
+    description: { en: "Removes links or packages from the list (files stay on disk).", fr: "Retire des liens ou des paquets de la liste (les fichiers restent).", es: "Quita enlaces o paquetes de la lista (los archivos se quedan)." }
+    binary: jdctl
+    mode: basic
+    secondary: true
+    params: [*links, *packages, *connection]
+    args: [remove, '{flags}']
+    progressParser: none
+    timeout: 30s
+
+  - id: jdctl.confirm
+    name: { en: "Download found links", fr: "Télécharger les liens trouvés", es: "Descargar los enlaces encontrados" }
+    description: { en: "Moves link grabber entries to the downloads.", fr: "Passe des entrées du collecteur aux téléchargements.", es: "Pasa entradas del recolector a las descargas." }
+    binary: jdctl
+    mode: basic
+    secondary: true
+    params: [*links, *packages, *connection]
+    args: [confirm, '{flags}']
+    progressParser: none
+    timeout: 30s
+
+  - id: jdctl.check
+    name: { en: "Check links", fr: "Vérifier les liens", es: "Comprobar los enlaces" }
+    description: { en: "Checks whether found links are online.", fr: "Vérifie si les liens trouvés sont en ligne.", es: "Comprueba si los enlaces encontrados están en línea." }
+    binary: jdctl
+    mode: basic
+    secondary: true
+    params: [*links, *packages, *connection]
+    args: [check, '{flags}']
+    progressParser: none
+    timeout: 30s
+
+  - id: jdctl.discard
+    name: { en: "Discard found links", fr: "Écarter les liens trouvés", es: "Descartar los enlaces encontrados" }
+    description: { en: "Removes entries from the link grabber.", fr: "Retire des entrées du collecteur.", es: "Quita entradas del recolector." }
+    binary: jdctl
+    mode: basic
+    secondary: true
+    params: [*links, *packages, *connection]
+    args: [discard, '{flags}']
+    progressParser: none
+    timeout: 30s
+
+  # Setting up connections: administrators, in advanced mode.
+  - id: jdctl.connect-local
+    name: { en: "Connect to JDownloader (network)", fr: "Connecter JDownloader (réseau)", es: "Conectar JDownloader (red)" }
+    description:
+      en: Saves a connection to JDownloader's local API (enable "Deprecated API" in its advanced settings).
+      fr: Enregistre une connexion à l'API locale de JDownloader (activez « Deprecated API » dans ses réglages avancés).
+      es: Guarda una conexión a la API local de JDownloader (active «Deprecated API» en sus ajustes avanzados).
+    binary: jdctl
+    mode: advanced
+    params:
+      - name: name
+        type: string
+        required: true
+        pattern: '[A-Za-z0-9._-]{1,40}'
+        label: { en: "Connection name", fr: "Nom de la connexion", es: "Nombre de la conexión" }
+      - name: url
+        type: string
+        required: true
+        flag: --url={value}
+        pattern: 'https?://[A-Za-z0-9.:\[\]_-]+(/[A-Za-z0-9._~/-]*)?'
+        label: { en: "Address", fr: "Adresse", es: "Dirección" }
+        help: { en: "Like http://192.168.1.11:3128", fr: "Par exemple http://192.168.1.11:3128", es: "Por ejemplo http://192.168.1.11:3128" }
+      - name: default
+        type: bool
+        flag: --default
+        label: { en: "Use by default", fr: "Utiliser par défaut", es: "Usar por defecto" }
+    args: [connect, local, '{name}', '{flags}']
+    progressParser: none
+    timeout: 1m
+
+  - id: jdctl.connect-cloud
+    name: { en: "Connect to MyJDownloader", fr: "Connecter MyJDownloader", es: "Conectar MyJDownloader" }
+    description:
+      en: Saves a connection through MyJDownloader; only secrets derived from the password are kept.
+      fr: Enregistre une connexion via MyJDownloader ; seuls des secrets dérivés du mot de passe sont gardés.
+      es: Guarda una conexión mediante MyJDownloader; solo se guardan secretos derivados de la contraseña.
+    binary: jdctl
+    mode: advanced
+    params:
+      - name: name
+        type: string
+        required: true
+        pattern: '[A-Za-z0-9._-]{1,40}'
+        label: { en: "Connection name", fr: "Nom de la connexion", es: "Nombre de la conexión" }
+      - name: email
+        type: string
+        required: true
+        flag: --email={value}
+        label: { en: "MyJDownloader e-mail", fr: "E-mail MyJDownloader", es: "Correo de MyJDownloader" }
+      - name: password
+        type: string
+        required: true
+        secret: true
+        flag: --password={value}
+        label: { en: "Password", fr: "Mot de passe", es: "Contraseña" }
+      - name: device
+        type: string
+        flag: --device={value}
+        label: { en: "JDownloader name", fr: "Nom du JDownloader", es: "Nombre del JDownloader" }
+        help: { en: "Needed when the account has several.", fr: "Nécessaire si le compte en a plusieurs.", es: "Necesario si la cuenta tiene varios." }
+      - name: default
+        type: bool
+        flag: --default
+        label: { en: "Use by default", fr: "Utiliser par défaut", es: "Usar por defecto" }
+    args: [connect, cloud, '{name}', '{flags}']
+    progressParser: none
+    timeout: 1m
+
+  - id: jdctl.connections
+    name: { en: "JDownloader connections", fr: "Connexions JDownloader", es: "Conexiones JDownloader" }
+    description: { en: "Lists the saved connections.", fr: "Liste les connexions enregistrées.", es: "Lista las conexiones guardadas." }
+    binary: jdctl
+    mode: advanced
+    params: []
+    args: [connections]
+    progressParser: none
+    timeout: 30s
+
+  - id: jdctl.forget
+    name: { en: "Forget a JDownloader connection", fr: "Oublier une connexion JDownloader", es: "Olvidar una conexión JDownloader" }
+    description: { en: "Removes a saved connection.", fr: "Retire une connexion enregistrée.", es: "Quita una conexión guardada." }
+    binary: jdctl
+    mode: advanced
+    params:
+      - name: name
+        type: string
+        required: true
+        pattern: '[A-Za-z0-9._-]{1,40}'
+        label: { en: "Connection name", fr: "Nom de la connexion", es: "Nombre de la conexión" }
+    args: [forget, '{name}']
+    progressParser: none
+    timeout: 30s

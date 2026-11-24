@@ -43,16 +43,14 @@ fn run(invocation: Invocation) -> Result<(), Error> {
         Command::ConnectCloud {
             name,
             email,
+            password,
             password_env,
             device,
             default,
-        } => connect_cloud(
-            &name,
-            &email,
-            password_env.as_deref(),
-            device.as_deref(),
-            default,
-        ),
+        } => {
+            let password = read_password(password, password_env.as_deref())?;
+            connect_cloud(&name, &email, password, device.as_deref(), default)
+        }
         Command::Forget { name } => forget(&name),
         Command::Connections => list_connections(json),
         Command::Devices => devices(connection.as_deref(), json),
@@ -84,10 +82,8 @@ fn with_api(
 }
 
 fn ids(target: &Target) -> (Value, Value) {
-    match target {
-        Target::Links(ids) => (json!(ids), json!([])),
-        Target::Packages(ids) => (json!([]), json!(ids)),
-    }
+    let Target { links, packages } = target;
+    (json!(links), json!(packages))
 }
 
 fn done(json: bool, what: &str) {
@@ -208,13 +204,14 @@ fn act(api: &mut dyn Api, command: Command, json: bool) -> Result<(), Error> {
             format!("Priority set to {level}.")
         }
         Command::Rename { target, name } => {
-            match target {
-                Target::Links(ids) => {
-                    api.call("/downloadsV2/renameLink", &[json!(ids[0]), json!(name)])?
+            match (target.links.first(), target.packages.first()) {
+                (Some(link), _) => {
+                    api.call("/downloadsV2/renameLink", &[json!(link), json!(name)])?
                 }
-                Target::Packages(ids) => {
-                    api.call("/downloadsV2/renamePackage", &[json!(ids[0]), json!(name)])?
+                (None, Some(package)) => {
+                    api.call("/downloadsV2/renamePackage", &[json!(package), json!(name)])?
                 }
+                (None, None) => unreachable!("the parser asks for one id"),
             };
             "Renamed.".to_owned()
         }
@@ -340,25 +337,29 @@ fn connect_local(name: &str, url: &str, default: bool) -> Result<(), Error> {
     Ok(())
 }
 
-fn read_password(password_env: Option<&str>) -> Result<String, Error> {
+/// The password given (Canopy passes it as a secret), read from a variable, or asked.
+fn read_password(given: Option<String>, password_env: Option<&str>) -> Result<String, Error> {
+    if let Some(password) = given.filter(|password| !password.is_empty()) {
+        return Ok(password);
+    }
     if let Some(variable) = password_env {
         return std::env::var(variable)
             .ok()
             .filter(|value| !value.is_empty())
             .ok_or_else(|| Error::Usage(format!("environment variable {variable} is empty")));
     }
-    rpassword::prompt_password("MyJDownloader password: ")
-        .map_err(|_| Error::Usage("no terminal to ask the password: use --password-env VAR".into()))
+    rpassword::prompt_password("MyJDownloader password: ").map_err(|_| {
+        Error::Usage("no terminal to ask the password: use --password or --password-env".into())
+    })
 }
 
 fn connect_cloud(
     name: &str,
     email: &str,
-    password_env: Option<&str>,
+    password: String,
     device: Option<&str>,
     default: bool,
 ) -> Result<(), Error> {
-    let password = read_password(password_env)?;
     let account = CloudAccount {
         email: email.to_lowercase(),
         login_secret: hex::encode(crypto::account_secret(email, &password, "server")),

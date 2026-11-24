@@ -4,10 +4,17 @@ use lexopt::{Arg, Parser, ValueExt};
 
 use crate::error::Error;
 
-#[derive(Debug, PartialEq)]
-pub enum Target {
-    Links(Vec<i64>),
-    Packages(Vec<i64>),
+/// The links and packages an action applies to (one list may be empty, not both).
+#[derive(Debug, Default, PartialEq)]
+pub struct Target {
+    pub links: Vec<i64>,
+    pub packages: Vec<i64>,
+}
+
+impl Target {
+    pub fn count(&self) -> usize {
+        self.links.len() + self.packages.len()
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -22,6 +29,7 @@ pub enum Command {
     ConnectCloud {
         name: String,
         email: String,
+        password: Option<String>,
         password_env: Option<String>,
         device: Option<String>,
         default: bool,
@@ -106,25 +114,24 @@ fn text(value: std::ffi::OsString) -> Result<String, Error> {
         .map_err(|_| usage("arguments must be valid text"))
 }
 
-/// `--link IDS` or `--package IDS` (one of them).
+/// `--link IDS` and/or `--package IDS` (each may repeat).
 fn target(parser: &mut Parser) -> Result<Target, Error> {
-    let mut found = None;
+    let mut target = Target::default();
     while let Some(arg) = parser.next().map_err(|e| usage(e.to_string()))? {
         match arg {
             Arg::Long("link") | Arg::Long("links") => {
-                found = Some(Target::Links(parse_ids(&text(
-                    parser.value().map_err(|e| usage(e.to_string()))?,
-                )?)?))
+                target.links.extend(parse_ids(&next_value(parser)?)?)
             }
             Arg::Long("package") | Arg::Long("packages") => {
-                found = Some(Target::Packages(parse_ids(&text(
-                    parser.value().map_err(|e| usage(e.to_string()))?,
-                )?)?))
+                target.packages.extend(parse_ids(&next_value(parser)?)?)
             }
             other => return Err(usage(format!("unexpected {}", describe(&other)))),
         }
     }
-    found.ok_or_else(|| usage("say which with --link IDS or --package IDS"))
+    if target.count() == 0 {
+        return Err(usage("say which with --link IDS and/or --package IDS"));
+    }
+    Ok(target)
 }
 
 fn describe(arg: &Arg) -> String {
@@ -135,44 +142,47 @@ fn describe(arg: &Arg) -> String {
     }
 }
 
-pub fn parse(args: Vec<std::ffi::OsString>) -> Result<Invocation, Error> {
-    let mut parser = Parser::from_args(args);
-    let mut connection = None;
-    let mut json = false;
-    let mut command_name = None;
-    while let Some(arg) = parser.next().map_err(|e| usage(e.to_string()))? {
-        match arg {
-            Arg::Long("connection") | Arg::Short('c') => {
-                connection = Some(text(parser.value().map_err(|e| usage(e.to_string()))?)?)
-            }
-            Arg::Long("json") => json = true,
-            Arg::Long("help") | Arg::Short('h') => {
-                return Ok(Invocation {
-                    connection,
-                    json,
-                    command: Command::Help,
-                });
-            }
-            Arg::Long("version") | Arg::Short('V') => {
-                return Ok(Invocation {
-                    connection,
-                    json,
-                    command: Command::Version,
-                });
-            }
-            Arg::Value(value) => {
-                command_name = Some(text(value)?);
-                break;
-            }
-            other => return Err(usage(format!("unexpected {}", describe(&other)))),
+/// Takes `--connection NAME` (or `=NAME`, `-c NAME`) and `--json` out of the arguments, wherever
+/// they are: Canopy puts its options after the command.
+fn global_options(
+    args: Vec<std::ffi::OsString>,
+) -> Result<(Vec<std::ffi::OsString>, Option<String>, bool), Error> {
+    let mut rest = Vec::with_capacity(args.len());
+    let (mut connection, mut json) = (None, false);
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
+        let text = arg.to_string_lossy();
+        if text == "--json" {
+            json = true;
+        } else if text == "--connection" || text == "-c" {
+            let value = iter
+                .next()
+                .ok_or_else(|| usage("--connection needs a name"))?;
+            connection = Some(value.to_string_lossy().into_owned());
+        } else if let Some(value) = text.strip_prefix("--connection=") {
+            connection = Some(value.to_owned());
+        } else {
+            rest.push(arg);
         }
     }
-    let Some(name) = command_name else {
-        return Ok(Invocation {
-            connection,
+    Ok((rest, connection.filter(|name| !name.is_empty()), json))
+}
+
+pub fn parse(args: Vec<std::ffi::OsString>) -> Result<Invocation, Error> {
+    let (args, connection, json) = global_options(args)?;
+    let mut parser = Parser::from_args(args);
+    let help = |command| {
+        Ok(Invocation {
+            connection: connection.clone(),
             json,
-            command: Command::Help,
-        });
+            command,
+        })
+    };
+    let name = match parser.next().map_err(|e| usage(e.to_string()))? {
+        None | Some(Arg::Long("help") | Arg::Short('h')) => return help(Command::Help),
+        Some(Arg::Long("version") | Arg::Short('V')) => return help(Command::Version),
+        Some(Arg::Value(value)) => text(value)?,
+        Some(other) => return Err(usage(format!("unexpected {}", describe(&other)))),
     };
     let command = match name.as_str() {
         "help" => Command::Help,
@@ -228,6 +238,7 @@ fn single(parser: &mut Parser, shape: &str) -> Result<String, Error> {
 fn connect(parser: &mut Parser) -> Result<Command, Error> {
     let kind = single(parser, "connect local|cloud NAME …")?;
     let name = single(parser, "connect local|cloud NAME …")?;
+    let mut password = None;
     let (mut url, mut email, mut password_env, mut device, mut default) =
         (None, None, None, None, false);
     while let Some(arg) = parser.next().map_err(|e| usage(e.to_string()))? {
@@ -235,6 +246,7 @@ fn connect(parser: &mut Parser) -> Result<Command, Error> {
             Arg::Long("url") => url = Some(next_value(parser)?),
             Arg::Long("email") => email = Some(next_value(parser)?),
             Arg::Long("password-env") => password_env = Some(next_value(parser)?),
+            Arg::Long("password") => password = Some(next_value(parser)?),
             Arg::Long("device") => device = Some(next_value(parser)?),
             Arg::Long("default") => default = true,
             other => return Err(usage(format!("unexpected {}", describe(&other)))),
@@ -251,6 +263,7 @@ fn connect(parser: &mut Parser) -> Result<Command, Error> {
         "cloud" => Ok(Command::ConnectCloud {
             name,
             email: email.ok_or_else(|| usage("connect cloud needs --email"))?,
+            password,
             password_env,
             device,
             default,
@@ -302,10 +315,7 @@ fn priority(parser: &mut Parser) -> Result<Command, Error> {
 fn rename(parser: &mut Parser) -> Result<Command, Error> {
     let name = single(parser, "rename NEW_NAME --link ID")?;
     let target = target(parser)?;
-    let single_id = match &target {
-        Target::Links(ids) | Target::Packages(ids) => ids.len() == 1,
-    };
-    if !single_id || name.trim().is_empty() {
+    if target.count() != 1 || name.trim().is_empty() {
         return Err(usage(
             "rename takes a new name and exactly one --link or --package id",
         ));
@@ -315,10 +325,14 @@ fn rename(parser: &mut Parser) -> Result<Command, Error> {
 
 fn folder(parser: &mut Parser) -> Result<Command, Error> {
     let folder = single(parser, "folder PATH --package IDS")?;
-    match target(parser)? {
-        Target::Packages(packages) => Ok(Command::Folder { packages, folder }),
-        Target::Links(_) => Err(usage("folder applies to packages: --package IDS")),
+    let target = target(parser)?;
+    if !target.links.is_empty() {
+        return Err(usage("folder applies to packages: --package IDS"));
     }
+    Ok(Command::Folder {
+        packages: target.packages,
+        folder,
+    })
 }
 
 fn call(parser: &mut Parser) -> Result<Command, Error> {
@@ -346,11 +360,11 @@ fn call(parser: &mut Parser) -> Result<Command, Error> {
 
 pub const HELP: &str = "jdctl — control JDownloader 2, locally or through MyJDownloader
 
-Usage: jdctl [--connection NAME] [--json] <command> [args]
+Usage: jdctl <command> [args] [--connection NAME] [--json]   (options anywhere)
 
 Connections (saved, encrypted when CANOPY_PLUGIN_KEY or JDCTL_KEY is set):
   connect local NAME --url http://HOST:3128 [--default]   local API (enable \"Deprecated API\")
-  connect cloud NAME --email EMAIL [--password-env VAR] [--device NAME] [--default]
+  connect cloud NAME --email EMAIL [--password P | --password-env VAR] [--device NAME] [--default]
                                                           MyJDownloader (asks the password)
   connections                 list them        forget NAME      remove one
   devices                     JDownloader instances of a MyJDownloader account
@@ -392,6 +406,11 @@ mod tests {
         assert_eq!(invocation.connection.as_deref(), Some("home"));
         assert!(invocation.json);
         assert_eq!(invocation.command, Command::State);
+        // Canopy puts its options after the command.
+        let after = run("enable --link 3 --connection=home --json").unwrap();
+        assert_eq!(after.connection.as_deref(), Some("home"));
+        assert!(after.json);
+        assert!(run("state --connection").is_err());
         assert_eq!(run("").unwrap().command, Command::Help);
         assert!(run("nope").is_err());
     }
@@ -416,6 +435,7 @@ mod tests {
             Command::ConnectCloud {
                 name: "my".into(),
                 email: "a@b.c".into(),
+                password: None,
                 password_env: Some("PW".into()),
                 device: None,
                 default: false
@@ -429,18 +449,34 @@ mod tests {
     fn parses_actions() {
         assert_eq!(
             run("enable --link 1,2").unwrap().command,
-            Command::Enable(Target::Links(vec![1, 2]))
+            Command::Enable(Target {
+                links: vec![1, 2],
+                packages: vec![]
+            })
         );
         assert_eq!(
             run("confirm --package 9").unwrap().command,
-            Command::Confirm(Target::Packages(vec![9]))
+            Command::Confirm(Target {
+                links: vec![],
+                packages: vec![9]
+            })
         );
         assert!(run("remove").is_err());
+        assert_eq!(
+            run("remove --link 1 --package 2,3").unwrap().command,
+            Command::Remove(Target {
+                links: vec![1],
+                packages: vec![2, 3]
+            })
+        );
         assert_eq!(
             run("priority HIGH --link 4").unwrap().command,
             Command::Priority {
                 level: "high".into(),
-                target: Target::Links(vec![4])
+                target: Target {
+                    links: vec![4],
+                    packages: vec![]
+                }
             }
         );
         assert!(run("priority urgent --link 4").is_err());
